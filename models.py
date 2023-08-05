@@ -4,6 +4,7 @@ from cryptography.fernet import Fernet
 import os
 from pathlib import Path
 
+
 class HostConnection(BaseModel):
     ip: str
     ssh_key: Optional[str] = Field(default_factory=lambda: os.environ.get("SSH_KEY"))
@@ -31,7 +32,7 @@ class HostConnection(BaseModel):
 class Host(BaseModel):
     name: str
     connection: HostConnection
-    secret_key: str = Field(default_factory=lambda: Fernet.generate_key().decode())
+    secret_key: str
 
     @root_validator(pre=True)
     @classmethod
@@ -54,8 +55,9 @@ class Host(BaseModel):
             )
         return values
 
+
 class Config(BaseModel):
     hosts: List[Host]
     secret_key: str
-    error_log: str|FilePath
-    output_log: str|FilePath
+    error_log: str | FilePath
+    output_log: str | FilePath
