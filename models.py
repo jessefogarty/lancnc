@@ -1,55 +1,61 @@
-from pydantic import BaseModel, validator, ConfigDict
-from typing import Optional
+from pydantic import BaseModel, Field, root_validator, FilePath
+from typing import Optional, List
+from cryptography.fernet import Fernet
 import os
-
-
-class HostConfig(BaseModel):
-    """Defines the structure of individual host configurations."""
-
-    name: str
-    host: str
-    username: str
-    ssh_key: str | None = None
-    password: str | None = None
-    secret_key: str | None = None
-
+from pathlib import Path
 
 class HostConnection(BaseModel):
     ip: str
-    port: int = 22
-    ssh_key: Optional[str]
-    username: str = os.getlogin()
-    password: Optional[str] = None
+    ssh_key: Optional[str] = Field(default_factory=lambda: os.environ.get("SSH_KEY"))
+    username: Optional[str] = Field(default_factory=lambda: os.environ.get("USER"))
+    password: Optional[str] = Field(default_factory=str)
 
-    @validator("ssh_key", pre=True, always=True)
-    def validate_ssh_key(cls, value: Optional[str]) -> Optional[str]:
-        if value:
-            return os.path.expanduser(os.path.expandvars(value))
-        return value
+    @root_validator(pre=True)
+    @classmethod
+    def validate_credentials(cls, values):
+        ssh_key = values.get("ssh_key")
+        username = values.get("username")
+        password = values.get("password")
+
+        if ssh_key:
+            return values
+
+        if username and password:
+            return values
+
+        raise ValueError(
+            "Either ssh_key must be provided or both username and password must be supplied"
+        )
 
 
 class Host(BaseModel):
-    """A model representing a Host configuration.
-    properties: name, connection* (*validated)
-    """
-
     name: str
     connection: HostConnection
+    secret_key: str = Field(default_factory=lambda: Fernet.generate_key().decode())
 
-    @validator("connection", pre=True, always=True)
-    def validate_connection(cls, value: HostConnection) -> HostConnection:
-        if not (value.ssh_key or value.password):
+    @root_validator(pre=True)
+    @classmethod
+    def validate_connection_object(cls, values):
+        connection = values.get("connection")
+        if not isinstance(connection, HostConnection):
             raise ValueError(
-                "Either ssh_key or password must be provided for the host connection."
+                "The connection field must contain a valid HostConnection object"
             )
-        return value
+        return values
 
+    @root_validator(pre=True)
+    @classmethod
+    def validate_secret_key_path(cls, values):
+        secret_key = values.get("secret_key")
+        secret_key_path = Path(secret_key)
+        if not secret_key_path.exists():
+            raise FileNotFoundError(
+                f"The secret key file does not exist: {secret_key_path}"
+            )
+        return values
 
-class HostResponse(BaseModel):
-    """A model representing the response from a command run on a Host.
-    properties: host, response, status_code
-    """
-
-    host: str
-    response: bytes | str | None
-    status_code: int | None
+class Config(BaseModel):
+    hosts: List[Host]
+    secret_key: str
+    error_log: str|FilePath
+    output_log: str|FilePath
